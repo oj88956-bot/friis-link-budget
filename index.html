@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Friis Link Budget Calculator — Free Space vs. Two-Ray</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --line: #334155; --text: #e2e8f0; --muted: #94a3b8;
+    --fs: #38bdf8; --tr: #f97316; --approx: #a78bfa; --sens: #ef4444; --ok: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.45; }
+  header { padding: 24px 32px 8px; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; color: #f8fafc; }
+  .sub { color: var(--muted); margin: 0; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 20px; padding: 16px 32px 32px; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+  .ctrl { margin-bottom: 14px; }
+  .ctrl label { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 4px; }
+  .ctrl label span.val { color: var(--fs); font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--fs); }
+  select, button { background: #0b1220; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 0.9rem; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--fs); }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .radio-row { display: flex; gap: 14px; font-size: 0.9rem; flex-wrap: wrap; }
+  .hint { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .card { background: #0b1220; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .card .k { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .v { font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .card .s { font-size: 0.75rem; color: var(--muted); }
+  #status { font-weight: 700; padding: 10px 14px; border-radius: 8px; margin-top: 10px; }
+  .chart-wrap { position: relative; height: 420px; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 0.85rem; margin-top: 8px; color: var(--muted); }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  .eq { background: #0b1220; border-left: 3px solid var(--fs); padding: 8px 12px; margin: 8px 0; font-family: "Cambria Math", Georgia, serif; font-size: 1rem; overflow-x: auto; }
+  .eq.tr { border-color: var(--tr); }
+  .eq.ap { border-color: var(--approx); }
+  ol, ul { padding-left: 20px; margin: 6px 0; }
+  li { margin-bottom: 4px; }
+  footer { padding: 0 32px 32px; color: var(--muted); font-size: 0.85rem; }
+  svg text { font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Friis Link Budget Calculator</h1>
+  <p class="sub">WCM555 · Interactive tool comparing the <b style="color:var(--fs)">free-space (Friis)</b> model with the <b style="color:var(--tr)">two-ray ground-reflection</b> model</p>
+</header>
+
+<main>
+  <!-- ================= LEFT: CONTROLS ================= -->
+  <section>
+    <div class="panel">
+      <h2>How to use</h2>
+      <ol style="font-size:0.88rem">
+        <li>Pick a preset or set transmitter power, antenna gains and frequency.</li>
+        <li>Move the <b>distance</b> slider. The orange dot on the plot shows where you are.</li>
+        <li>Set the antenna heights to see the two-ray interference pattern and the 1/d⁴ region.</li>
+        <li>Compare received power with the receiver sensitivity to read the link margin.</li>
+      </ol>
+    </div>
+
+    <div class="panel">
+      <h2>Presets</h2>
+      <div class="presets">
+        <button data-preset="wifi">Wi-Fi 2.4 GHz</button>
+        <button data-preset="wifi5">Wi-Fi 5.8 GHz</button>
+        <button data-preset="lora">LoRa 915 MHz</button>
+        <button data-preset="cell">Cell tower 1.9 GHz</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Transmitter &amp; receiver</h2>
+      <div class="ctrl">
+        <label><span>TX power P<sub>t</sub></span> <span class="val" id="ptVal"></span></label>
+        <input type="range" id="pt" min="-10" max="50" step="1" value="20">
+      </div>
+      <div class="ctrl">
+        <label><span>TX antenna gain G<sub>t</sub></span> <span class="val" id="gtVal"></span></label>
+        <input type="range" id="gt" min="0" max="30" step="0.5" value="2">
+      </div>
+      <div class="ctrl">
+        <label><span>RX antenna gain G<sub>r</sub></span> <span class="val" id="grVal"></span></label>
+        <input type="range" id="gr" min="0" max="30" step="0.5" value="2">
+      </div>
+      <div class="ctrl">
+        <label><span>Frequency f</span> <span class="val" id="fVal"></span></label>
+        <input type="range" id="f" min="1.4771" max="4.4771" step="any" value="3.380211">
+        <div class="hint">Log slider: 30 MHz – 30 GHz</div>
+      </div>
+      <div class="ctrl">
+        <label><span>Other losses L (cables, etc.)</span> <span class="val" id="lVal"></span></label>
+        <input type="range" id="l" min="0" max="20" step="0.5" value="0">
+      </div>
+      <div class="ctrl">
+        <label><span>RX sensitivity S</span> <span class="val" id="sVal"></span></label>
+        <input type="range" id="s" min="-130" max="-40" step="1" value="-85">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Geometry</h2>
+      <div class="ctrl">
+        <label><span>Distance d</span> <span class="val" id="dVal"></span></label>
+        <input type="range" id="d" min="0" max="5" step="any" value="3">
+        <div class="hint">Log slider: 1 m – 100 km (horizontal distance)</div>
+      </div>
+      <div class="ctrl">
+        <label><span>TX antenna height h<sub>t</sub></span> <span class="val" id="htVal"></span></label>
+        <input type="range" id="ht" min="1" max="100" step="0.5" value="10">
+      </div>
+      <div class="ctrl">
+        <label><span>RX antenna height h<sub>r</sub></span> <span class="val" id="hrVal"></span></label>
+        <input type="range" id="hr" min="1" max="100" step="0.5" value="2">
+      </div>
+      <div class="ctrl">
+        <label><span>Ground reflection coefficient Γ</span> <span class="val" id="gamVal"></span></label>
+        <input type="range" id="gam" min="-1" max="0" step="0.05" value="-1">
+        <div class="hint">−1 = perfect reflecting ground, 0 = no reflection (two-ray becomes free space)</div>
+      </div>
+      <div class="ctrl">
+        <label>Model used for the link-margin readout</label>
+        <div class="radio-row">
+          <label><input type="radio" name="model" value="fs"> Free space</label>
+          <label><input type="radio" name="model" value="tr" checked> Two-ray</label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= RIGHT: OUTPUTS ================= -->
+  <section>
+    <div class="panel">
+      <h2>Link geometry</h2>
+      <svg id="geo" viewBox="0 0 640 190" width="100%" height="190"></svg>
+    </div>
+
+    <div class="panel">
+      <h2>Received power vs. distance</h2>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+      <div class="legend">
+        <span><i style="background:var(--fs)"></i>Free space (Friis), slope −20 dB/decade</span>
+        <span><i style="background:var(--tr)"></i>Two-ray (exact)</span>
+        <span><i style="background:var(--approx)"></i>Two-ray approx. h<sub>t</sub>²h<sub>r</sub>²/d⁴, slope −40 dB/decade</span>
+        <span><i style="background:var(--sens)"></i>RX sensitivity</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Results at the selected distance</h2>
+      <div class="results" id="results"></div>
+      <div id="status"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Equations used</h2>
+      <p style="margin:0 0 4px">Wavelength and free-space path loss:</p>
+      <div class="eq">λ = c / f &nbsp;&nbsp;&nbsp; FSPL(dB) = 20 log<sub>10</sub>(4πd / λ) = 20 log<sub>10</sub>(d) + 20 log<sub>10</sub>(f) − 147.55</div>
+      <p style="margin:8px 0 4px">Friis transmission equation (in dB):</p>
+      <div class="eq">P<sub>r</sub>(dBm) = P<sub>t</sub>(dBm) + G<sub>t</sub>(dBi) + G<sub>r</sub>(dBi) − FSPL(dB) − L(dB)</div>
+      <p style="margin:8px 0 4px">Two-ray model (direct path d₁ plus ground-reflected path d₂):</p>
+      <div class="eq tr">d₁ = √(d² + (h<sub>t</sub> − h<sub>r</sub>)²), &nbsp; d₂ = √(d² + (h<sub>t</sub> + h<sub>r</sub>)²), &nbsp; Δd = d₂ − d₁, &nbsp; Δφ = 2πΔd / λ</div>
+      <div class="eq tr">P<sub>r</sub> = P<sub>t</sub> G<sub>t</sub> G<sub>r</sub> (λ / 4π)² · | 1/d₁ + Γ e<sup>−jΔφ</sup> / d₂ |²</div>
+      <p style="margin:8px 0 4px">Far-distance approximation (Γ = −1, d ≫ d<sub>c</sub>) and crossover distance:</p>
+      <div class="eq ap">P<sub>r</sub> ≈ P<sub>t</sub> G<sub>t</sub> G<sub>r</sub> h<sub>t</sub>² h<sub>r</sub>² / d⁴ &nbsp;&nbsp;&nbsp; d<sub>c</sub> = 4π h<sub>t</sub> h<sub>r</sub> / λ</div>
+      <p style="margin:8px 0 4px">Link margin and maximum free-space range:</p>
+      <div class="eq">Margin(dB) = P<sub>r</sub> − S &nbsp;&nbsp;&nbsp; d<sub>max,FS</sub> = (λ / 4π) · 10<sup>(P<sub>t</sub> + G<sub>t</sub> + G<sub>r</sub> − L − S) / 20</sup></div>
+      <p class="hint" style="font-size:0.85rem">c = 3×10⁸ m/s. Gains are in linear form inside the two-ray formula and in dB in the Friis equation.</p>
+    </div>
+
+    <div class="panel">
+      <h2>What to notice</h2>
+      <ul style="font-size:0.9rem">
+        <li><b>Free space:</b> doubling the distance costs 6 dB, and doubling the frequency also costs 6 dB.</li>
+        <li><b>Near the transmitter (d &lt; d<sub>c</sub>):</b> the direct and reflected waves go in and out of phase, so the two-ray curve swings above and below free space. It can be up to 6 dB stronger, and in the deep nulls it drops off sharply.</li>
+        <li><b>Far away (d &gt; d<sub>c</sub>):</b> the two waves almost cancel, so power falls at 40 dB/decade (1/d⁴) instead of 20 dB/decade. In this region the received power no longer depends on frequency.</li>
+        <li><b>Raising the antennas</b> pushes d<sub>c</sub> further out and increases the far-distance received power by 20 log<sub>10</sub>(h<sub>t</sub>h<sub>r</sub>).</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <b>References:</b> WCM555 lecture notes (antennas &amp; radio wave propagation); T. S. Rappaport, <i>Wireless Communications: Principles and Practice</i>, 2nd ed., §4.3 (Friis free-space model) and §4.6 (two-ray ground reflection model).<br>
+  <b>AI disclosure:</b> AI coding assistance (Claude) was used to help write this page. All equations and outputs were reviewed and checked against hand calculations.
+</footer>
+
+<script>
+// ================= CONSTANTS & HELPERS =================
+const C = 3e8;                                   // speed of light (m/s)
+const $ = id => document.getElementById(id);
+const dB = x => 10 * Math.log10(x);              // linear -> dB
+const lin = x => Math.pow(10, x / 10);           // dB -> linear
+
+function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 1 : 2) + " km" : m.toFixed(m < 10 ? 2 : 1) + " m"; }
+function fmtFreq(hz) { return hz >= 1e9 ? (hz / 1e9).toFixed(3) + " GHz" : (hz / 1e6).toFixed(1) + " MHz"; }
+function fmtPower(dbm) {                          // dBm -> readable W/mW/µW/nW/pW
+  const w = Math.pow(10, (dbm - 30) / 10);
+  const units = [[1e3, "kW"], [1, "W"], [1e-3, "mW"], [1e-6, "µW"], [1e-9, "nW"], [1e-12, "pW"], [1e-15, "fW"]];
+  for (const [s, u] of units) if (w >= s) return (w / s).toPrecision(3) + " " + u;
+  return w.toExponential(2) + " W";
+}
+
+// ================= READ INPUTS =================
+function inputs() {
+  return {
+    pt: +$("pt").value,                          // dBm
+    gt: +$("gt").value,                          // dBi
+    gr: +$("gr").value,                          // dBi
+    f: Math.pow(10, +$("f").value) * 1e6,        // Hz (slider is log10 of MHz)
+    L: +$("l").value,                            // dB
+    S: +$("s").value,                            // dBm
+    d: Math.pow(10, +$("d").value),              // m (slider is log10 of metres)
+    ht: +$("ht").value,                          // m
+    hr: +$("hr").value,                          // m
+    gam: +$("gam").value,                        // reflection coefficient (real)
+    model: document.querySelector('input[name="model"]:checked').value
+  };
+}
+
+// ================= PROPAGATION MODELS =================
+// Free space (Friis): Pr(dBm) = Pt + Gt + Gr - FSPL - L
+function fspl(d, lambda) { return 20 * Math.log10(4 * Math.PI * d / lambda); }
+function prFreeSpace(p, d, lambda) { return p.pt + p.gt + p.gr - fspl(d, lambda) - p.L; }
+
+// Two-ray (exact): sum direct + reflected fields as phasors.
+// Pr = Pt Gt Gr (λ/4π)^2 |1/d1 + Γ e^{-jΔφ}/d2|^2
+function twoRayDetail(p, d, lambda) {
+  const d1 = Math.sqrt(d * d + (p.ht - p.hr) ** 2);   // direct path length
+  const d2 = Math.sqrt(d * d + (p.ht + p.hr) ** 2);   // reflected path length
+  const dd = 4 * p.ht * p.hr / (d1 + d2);             // Δd = d2 - d1 (exact identity, avoids round-off)
+  const phi = 2 * Math.PI * dd / lambda;               // phase difference Δφ (rad)
+  const re = 1 / d1 + p.gam * Math.cos(phi) / d2;      // real part of phasor sum
+  const im = -p.gam * Math.sin(phi) / d2;              // imaginary part
+  const mag2 = re * re + im * im;                      // |sum|^2  (units 1/m^2)
+  const prLin = lin(p.pt + p.gt + p.gr - p.L) * (lambda / (4 * Math.PI)) ** 2 * mag2; // mW
+  return { d1, d2, dd, phi, prDbm: dB(Math.max(prLin, 1e-30)) };
+}
+
+// Two-ray far approximation (Γ = -1, d >> dc): Pr = Pt Gt Gr ht^2 hr^2 / d^4
+function prTwoRayApprox(p, d) {
+  return p.pt + p.gt + p.gr - p.L + 20 * Math.log10(p.ht * p.hr) - 40 * Math.log10(d);
+}
+
+// ================= CHART =================
+const DMIN = 1, DMAX = 1e5, NPTS = 1500;
+const chart = new Chart($("chart"), {
+  type: "scatter",
+  data: { datasets: [
+    { label: "Free space", data: [], showLine: true, borderColor: "#38bdf8", borderWidth: 2, pointRadius: 0 },
+    { label: "Two-ray (exact)", data: [], showLine: true, borderColor: "#f97316", borderWidth: 1.5, pointRadius: 0 },
+    { label: "Two-ray approx (1/d⁴)", data: [], showLine: true, borderColor: "#a78bfa", borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0 },
+    { label: "RX sensitivity", data: [], showLine: true, borderColor: "#ef4444", borderWidth: 1.5, borderDash: [3, 3], pointRadius: 0 },
+    { label: "Crossover dc", data: [], showLine: true, borderColor: "#64748b", borderWidth: 1, borderDash: [2, 4], pointRadius: 0 },
+    { label: "Selected distance", data: [], pointRadius: 7, pointBackgroundColor: "#fbbf24", pointBorderColor: "#fff", pointBorderWidth: 2 }
+  ]},
+  options: {
+    animation: false, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} dBm @ ${fmtDist(c.parsed.x)}` } }
+    },
+    scales: {
+      x: { type: "logarithmic", min: DMIN, max: DMAX,
+           title: { display: true, text: "Distance d (m) — log scale", color: "#cbd5e1" },
+           ticks: { color: "#94a3b8", callback: v => [1, 10, 100, 1e3, 1e4, 1e5].includes(v) ? fmtDist(v) : "" },
+           grid: { color: "#273449" } },
+      y: { title: { display: true, text: "Received power Pr (dBm)", color: "#cbd5e1" },
+           ticks: { color: "#94a3b8" }, grid: { color: "#273449" } }
+    }
+  }
+});
+
+// ================= GEOMETRY DIAGRAM =================
+function drawGeometry(p, dc) {
+  const d1 = Math.sqrt(p.d * p.d + (p.ht - p.hr) ** 2);
+  const W = 640, G = 165, x1 = 70, x2 = 570, maxH = 125;
+  const hmax = Math.max(p.ht, p.hr);
+  const yt = G - maxH * p.ht / hmax, yr = G - maxH * p.hr / hmax;
+  const xRef = x1 + (x2 - x1) * p.ht / (p.ht + p.hr);   // specular reflection point
+  $("geo").innerHTML = `
+    <rect x="0" y="${G}" width="${W}" height="25" fill="#3f3a2a"/>
+    <line x1="${x1}" y1="${G}" x2="${x1}" y2="${yt}" stroke="#cbd5e1" stroke-width="3"/>
+    <line x1="${x2}" y1="${G}" x2="${x2}" y2="${yr}" stroke="#cbd5e1" stroke-width="3"/>
+    <circle cx="${x1}" cy="${yt}" r="6" fill="#38bdf8"/><circle cx="${x2}" cy="${yr}" r="6" fill="#38bdf8"/>
+    <line x1="${x1}" y1="${yt}" x2="${x2}" y2="${yr}" stroke="#38bdf8" stroke-width="2"/>
+    <polyline points="${x1},${yt} ${xRef},${G} ${x2},${yr}" fill="none" stroke="#f97316" stroke-width="2" stroke-dasharray="6 4" opacity="${Math.abs(p.gam) < 0.01 ? 0.15 : 1}"/>
+    <text x="${x1 - 10}" y="${(yt + G) / 2}" fill="#e2e8f0" font-size="13" text-anchor="end">hₜ = ${p.ht} m</text>
+    <text x="${x2 + 10}" y="${(yr + G) / 2}" fill="#e2e8f0" font-size="13">hᵣ = ${p.hr} m</text>
+    <text x="${x1}" y="${yt - 12}" fill="#94a3b8" font-size="12" text-anchor="middle">TX</text>
+    <text x="${x2}" y="${yr - 12}" fill="#94a3b8" font-size="12" text-anchor="middle">RX</text>
+    <text x="${(x1 + x2) / 2}" y="${G + 18}" fill="#e2e8f0" font-size="13" text-anchor="middle">d = ${fmtDist(p.d)} (not to scale)</text>
+    <line x1="400" y1="14" x2="430" y2="14" stroke="#38bdf8" stroke-width="2"/>
+    <text x="436" y="18" fill="#38bdf8" font-size="12">direct path d₁ = ${fmtDist(d1)}</text>
+    <line x1="400" y1="32" x2="430" y2="32" stroke="#f97316" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="436" y="36" fill="#f97316" font-size="12">reflected path d₂ (Γ = ${p.gam.toFixed(2)})</text>`;
+}
+
+// ================= MAIN UPDATE =================
+function update() {
+  const p = inputs();
+  const lambda = C / p.f;
+  const dc = 4 * Math.PI * p.ht * p.hr / lambda;
+
+  // slider labels
+  $("ptVal").textContent = `${p.pt} dBm (${fmtPower(p.pt)})`;
+  $("gtVal").textContent = `${p.gt} dBi`;
+  $("grVal").textContent = `${p.gr} dBi`;
+  $("fVal").textContent = fmtFreq(p.f);
+  $("lVal").textContent = `${p.L} dB`;
+  $("sVal").textContent = `${p.S} dBm`;
+  $("dVal").textContent = fmtDist(p.d);
+  $("htVal").textContent = `${p.ht} m`;
+  $("hrVal").textContent = `${p.hr} m`;
+  $("gamVal").textContent = p.gam.toFixed(2);
+
+  // curves
+  const fs = [], tr = [], ap = [];
+  for (let i = 0; i < NPTS; i++) {
+    const d = DMIN * Math.pow(DMAX / DMIN, i / (NPTS - 1));
+    fs.push({ x: d, y: prFreeSpace(p, d, lambda) });
+    tr.push({ x: d, y: twoRayDetail(p, d, lambda).prDbm });
+    if (d > dc / 3) ap.push({ x: d, y: prTwoRayApprox(p, d) });   // only draw where it is meaningful
+  }
+  const yTop = Math.ceil((p.pt + p.gt + p.gr + 10) / 10) * 10;
+  const yBot = Math.min(Math.floor((prFreeSpace(p, DMAX, lambda) - 50) / 10) * 10, p.S - 20);
+  chart.data.datasets[0].data = fs;
+  chart.data.datasets[1].data = tr;
+  chart.data.datasets[2].data = ap;
+  chart.data.datasets[3].data = [{ x: DMIN, y: p.S }, { x: DMAX, y: p.S }];
+  chart.data.datasets[4].data = (dc > DMIN && dc < DMAX) ? [{ x: dc, y: yBot }, { x: dc, y: yTop }] : [];
+
+  // values at selected distance
+  const prFS = prFreeSpace(p, p.d, lambda);
+  const t = twoRayDetail(p, p.d, lambda);
+  const prSel = p.model === "fs" ? prFS : t.prDbm;
+  chart.data.datasets[5].data = [{ x: p.d, y: prSel }];
+  chart.options.scales.y.min = yBot;
+  chart.options.scales.y.max = yTop;
+  chart.update();
+
+  const margin = prSel - p.S;
+  const eirp = p.pt + p.gt;
+  const dmaxFS = lambda / (4 * Math.PI) * Math.pow(10, (p.pt + p.gt + p.gr - p.L - p.S) / 20);
+  const dmaxTR = Math.pow(lin(p.pt + p.gt + p.gr - p.L - p.S) * (p.ht * p.hr) ** 2, 0.25);
+
+  const cards = [
+    ["Wavelength λ", `${lambda < 1 ? (lambda * 100).toFixed(2) + " cm" : lambda.toFixed(3) + " m"}`, `λ = c / f`],
+    ["EIRP", `${eirp.toFixed(1)} dBm`, fmtPower(eirp)],
+    ["Free-space path loss", `${fspl(p.d, lambda).toFixed(2)} dB`, `20log₁₀(4πd/λ)`],
+    ["Pr — free space", `${prFS.toFixed(2)} dBm`, fmtPower(prFS)],
+    ["Pr — two-ray", `${t.prDbm.toFixed(2)} dBm`, `${(t.prDbm - prFS >= 0 ? "+" : "") + (t.prDbm - prFS).toFixed(2)} dB vs. free space`],
+    ["Path difference Δd", `${t.dd < 0.01 ? (t.dd * 1000).toFixed(3) + " mm" : t.dd.toFixed(4) + " m"}`, `Δφ = ${(t.phi * 180 / Math.PI).toFixed(1)}° (${(t.dd / lambda).toFixed(3)} λ)`],
+    ["Crossover distance dc", fmtDist(dc), p.d > dc ? "You are in the 1/d⁴ region" : "You are in the interference region"],
+    ["Max range (free space)", fmtDist(dmaxFS), "where Pr = S"],
+    ["Max range (two-ray, 1/d⁴)", fmtDist(dmaxTR), dmaxTR > dc ? "valid (beyond dc)" : "approx. not valid (< dc)"],
+    ["Link margin", `${margin.toFixed(2)} dB`, `Pr − S (${p.model === "fs" ? "free space" : "two-ray"})`]
+  ];
+  $("results").innerHTML = cards.map(([k, v, s]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  const st = $("status");
+  if (margin >= 10) { st.textContent = `✅ Link OK — ${margin.toFixed(1)} dB margin (comfortable, ≥ 10 dB fade margin)`; st.style.background = "#14532d"; }
+  else if (margin >= 0) { st.textContent = `⚠️ Link marginal — only ${margin.toFixed(1)} dB margin (fading could drop the link)`; st.style.background = "#713f12"; }
+  else { st.textContent = `❌ Link fails — received power is ${(-margin).toFixed(1)} dB below sensitivity`; st.style.background = "#7f1d1d"; }
+
+  drawGeometry(p, dc);
+}
+
+// ================= PRESETS =================
+const PRESETS = {
+  wifi:  { pt: 20, gt: 2,  gr: 2,  f: 2400, l: 0, s: -85,  d: 100,  ht: 3,  hr: 1.5, gam: -1 },
+  wifi5: { pt: 23, gt: 5,  gr: 5,  f: 5800, l: 1, s: -80,  d: 100,  ht: 3,  hr: 1.5, gam: -1 },
+  lora:  { pt: 14, gt: 3,  gr: 2,  f: 915,  l: 1, s: -125, d: 5000, ht: 15, hr: 1.5, gam: -1 },
+  cell:  { pt: 43, gt: 17, gr: 0,  f: 1900, l: 3, s: -105, d: 2000, ht: 30, hr: 1.5, gam: -1 }
+};
+document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
+  const q = PRESETS[b.dataset.preset];
+  $("pt").value = q.pt; $("gt").value = q.gt; $("gr").value = q.gr;
+  $("f").value = Math.log10(q.f); $("l").value = q.l; $("s").value = q.s;
+  $("d").value = Math.log10(q.d); $("ht").value = q.ht; $("hr").value = q.hr; $("gam").value = q.gam;
+  update();
+}));
+
+document.querySelectorAll("input").forEach(el => el.addEventListener("input", update));
+update();
+</script>
+</body>
+</html>
